@@ -41,3 +41,18 @@ npm start
 Deploy with a Node.js server using HTTPS and restricted access for demo participants. Configure deployment secrets server-side. Proxies and hosts must allow multipart bodies of at least 500,065,536 bytes, up to 10 minutes for the upstream file transfer, and up to 60 seconds for job creation, in addition to the time for the browser transfer. The browser allows 20 minutes for the initial submission. Poll requests have a 20-second upstream deadline and jobs can run across requests. Hosts with smaller hard upload or execution limits require a different deployment configuration.
 
 The server bounds multipart parsing and accepts one concurrent upload per route process. Multipart parsing can hold several copies of the document in memory. Provision multiple GB of RAM per process for maximum-size uploads and test the full upload path through your hosting stack before the demo.
+
+## Deploy from GitHub
+
+The **Build and publish container** workflow builds and smoke-tests the production image on pushes and pull requests. Successful runs on the default branch publish the verified image to GitHub Container Registry as `ghcr.io/insarimash/aramco-hack:<commit-sha>`. You can also run the workflow manually from the **Actions** tab. Publishing uses GitHub's built-in token and requires package write access.
+
+Deploy that image to a Docker host. Set `UPSTAGE_API_KEY` and any optional agent settings in the host's runtime secrets. The image listens on port 3000. If the package is private, give the host registry credentials with read access. On a Docker machine, this starts the image on a local port for testing:
+
+```sh
+docker run --rm --env-file .env.local -p 127.0.0.1:3000:3000 \
+  ghcr.io/insarimash/aramco-hack:<commit-sha>
+```
+
+GitHub Pages provides static hosting. This app requires a running Node.js server for the authenticated upload and polling routes. GitHub Actions publishes the image and the Docker host serves the app. Apply the HTTPS, access, upload and timing settings above on that host.
+
+[GitHub container publishing documentation](https://docs.github.com/en/actions/tutorials/publish-packages/publish-docker-images)
