@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { accept, validateFile, type ReviewResponse } from "../src/review";
+import type { SavedReview } from "../src/local-store";
 
 const storageKey = "cbam-active-review";
 const pending = "pending";
@@ -69,6 +70,14 @@ function Findings({ result }: { result: unknown }) {
 type Phase = "idle" | "uploading" | "processing" | "paused" | "unknown" | "completed" | "error";
 
 export default function Page() {
+  const [user, setUser] = useState<string | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const [reviews, setReviews] = useState<SavedReview[]>([]);
   const input = useRef<HTMLInputElement>(null);
   const locked = useRef(false);
   const knownFailures = useRef(0);
@@ -82,7 +91,29 @@ export default function Page() {
   const [run, setRun] = useState("");
   const [retryAt, setRetryAt] = useState(0);
 
+  useEffect(() => { fetch("/api/auth").then((response) => response.json()).then((data) => setUser(data.user?.email ?? null)).finally(() => setAuthReady(true)); }, []);
   useEffect(() => {
+    if (!user) return;
+    fetch("/api/history").then((response) => response.json()).then((data) => setReviews(data.reviews ?? []));
+  }, [user, phase]);
+
+  async function authenticate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setAuthBusy(true); setAuthError("");
+    try {
+      const response = await fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: authMode, email, password }) });
+      const data = await response.json();
+      if (!response.ok) { setAuthError(data.error); return; }
+      setPassword(""); setUser(data.user.email);
+    } catch { setAuthError("Could not reach the server."); }
+    finally { setAuthBusy(false); }
+  }
+  async function signOut() {
+    await fetch("/api/auth", { method: "DELETE" });
+    setUser(null); setReviews([]); setResult(undefined); setRun(""); setPhase("idle"); storeRun(null);
+  }
+
+  useEffect(() => {
+    if (!authReady || !user) return;
     const restore = setTimeout(() => {
       try {
         const saved = sessionStorage.getItem(storageKey);
@@ -98,7 +129,7 @@ export default function Page() {
       }
     }, 0);
     return () => clearTimeout(restore);
-  }, []);
+  }, [authReady, user]);
 
   useEffect(() => {
     if (!retryAt) return;
@@ -228,8 +259,9 @@ export default function Page() {
 
   return (
     <>
-      <header className="top"><div className="wrap brand"><span className="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M5 18 18 5M7 16C2 11 6 5 19 5c0 13-6 17-11 12"/><path d="M11 12v-3m1 3h4"/></svg></span><span>Aramco Hackathon</span></div></header>
+      <header className="top"><div className="wrap brand"><span className="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M5 18 18 5M7 16C2 11 6 5 19 5c0 13-6 17-11 12"/><path d="M11 12v-3m1 3h4"/></svg></span><span>Aramco Hackathon</span>{user && <div className="account"><span>{user}</span><button className="quiet" onClick={signOut}>Sign out</button></div>}</div></header>
       <main className="wrap">
+        {!authReady ? <p>Loading account…</p> : !user ? <section className="panel auth-panel"><h1>{authMode === "login" ? "Sign in" : "Create account"}</h1><p>Save your CBAM review results on this computer.</p><form onSubmit={authenticate}><label htmlFor="email">Email</label><input id="email" type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} /><label htmlFor="password">Password</label><input id="password" type="password" minLength={8} maxLength={128} required autoComplete={authMode === "login" ? "current-password" : "new-password"} value={password} onChange={(event) => setPassword(event.target.value)} />{authError && <p className="notice" role="alert">{authError}</p>}<button className="primary" disabled={authBusy}>{authMode === "login" ? "Sign in" : "Create account"}</button></form><button className="auth-switch" onClick={() => { setAuthMode(authMode === "login" ? "register" : "login"); setAuthError(""); }}>{authMode === "login" ? "Need an account? Register" : "Already have an account? Sign in"}</button></section> : <>
         <div className="intro"><h1>Fertilizer CBAM review</h1><p>Upload a shipment document and review the findings from your Upstage workflow.</p></div>
         <div className="workspace">
           <section className="panel" aria-labelledby="upload-heading">
@@ -271,6 +303,8 @@ export default function Page() {
             {phase === "completed" && <Findings result={result} />}
           </section>
         </div>
+        <section className="panel history"><h2>Saved reviews</h2>{reviews.length === 0 ? <p>No saved reviews yet.</p> : <ul>{reviews.map((item) => <li key={item.run}><div><strong>{item.fileName}</strong><small>{new Date(item.createdAt).toLocaleString()} · {item.completedAt ? "Completed" : "Processing"}</small></div>{item.completedAt ? <button className="secondary" onClick={() => { setResult(item.result); setPhase("completed"); }}>View result</button> : <button className="secondary" onClick={() => { storeRun(item.run); setRun(item.run); setPhase("processing"); }}>Resume</button>}</li>)}</ul>}</section>
+        </>}
       </main>
     </>
   );

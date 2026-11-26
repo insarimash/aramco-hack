@@ -13,6 +13,9 @@ npm run dev
 
 Open http://localhost:3000. Put the real key in the ignored `.env.local` file and restart the server after changing the environment. If the file is missing, copy `.env.example` to `.env.local` first.
 
+Create an account on the sign-in page to run reviews. Accounts, password hashes, sessions, and completed workflow results are stored in the ignored `local-data/store.json` file. Each signed-in user sees only their own saved reviews. Keep this directory private and back it up if the local results matter. The JSON store is intended for a single local Node.js server with a persistent disk; it is not suitable for serverless deployment or multiple server processes. Uploaded document bytes are not saved locally.
+Set `CBAM_DATA_DIR` before starting the server if you want the JSON file in another directory.
+
 | Variable | Server-side value |
 | --- | --- |
 | `UPSTAGE_API_KEY` | Required. Get your key in [Upstage Studio](https://console.upstage.ai/api-keys). |

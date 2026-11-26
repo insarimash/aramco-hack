@@ -225,6 +225,7 @@ __marimo__/
 # Next.js
 /.env.local
 /.next/
+/local-data/
 /node_modules/
 /next-env.d.ts
 *.tsbuildinfo

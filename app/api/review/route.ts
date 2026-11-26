@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { maxFileBytes, validateFile, type ReviewResponse } from "../../../src/review";
+import { addReview, completeReview, currentUser, ownsReview } from "../../../src/local-store";
 
 export const runtime = "nodejs";
 const base = "https://api.upstage.ai/v2";
@@ -58,6 +59,8 @@ function object(value: unknown): Record<string, unknown> {
 }
 
 export async function POST(request: Request) {
+  const user = await currentUser(request);
+  if (!user) return error("Please sign in to run a review.", 401);
   const key = process.env.UPSTAGE_API_KEY?.trim();
   if (!key) return error("The server needs an Upstage API key. Ask the demo operator to configure it.", 503);
   if (request.headers.get("X-CBAM-Upload") !== "1") return error("Upload one file using the upload form.", 400);
@@ -112,7 +115,9 @@ export async function POST(request: Request) {
     if (!creation.ok) return upstreamError(creation, "create");
     const { id } = object(await creation.json());
     if (typeof id !== "string" || !/^[\w-]{1,256}$/.test(id)) return uncertain();
-    return reply({ state: "processing", run: id + "." + signature(id, key) }, 202);
+    const run = id + "." + signature(id, key);
+    await addReview(user.id, run, file.name);
+    return reply({ state: "processing", run }, 202);
   } catch (cause) {
     if (creating) return uncertain();
     if (cause instanceof Error && cause.name === "TimeoutError") {
@@ -213,18 +218,24 @@ const failureMessages: Record<string, string> = {
 const stages = ["parse", "classify", "extract", "merge", "system"];
 
 export async function GET(request: Request) {
+  const user = await currentUser(request);
+  if (!user) return error("Please sign in to view this review.", 401);
   const key = process.env.UPSTAGE_API_KEY?.trim();
   if (!key) return error("The server needs an Upstage API key to check this job.", 503);
   const token = new URL(request.url).searchParams.get("run") ?? "";
   const id = readRun(token, key);
   if (!id) return error("This job reference is invalid. Check the job in Studio.", 400);
+  if (!await ownsReview(user.id, token)) return error("This review does not belong to your account.", 403);
   try {
     const response = await requestUpstage("/responses/" + id + "?include[]=last", key, {}, 20_000);
     if (!response.ok) return upstreamError(response, "poll");
     const job = object(await response.json());
     if (job.status === "completed") {
       const { result, issue } = readResult(job);
-      if (result !== undefined) return reply({ state: "completed", result });
+      if (result !== undefined) {
+        await completeReview(user.id, token, result);
+        return reply({ state: "completed", result });
+      }
       return error("The job finished and " + issue + ". Check the final step in Upstage Studio for job " + id + ".", 422);
     }
     if (job.status === "cancelled") return error("Upstage cancelled this job.", 422);
