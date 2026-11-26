@@ -29,7 +29,9 @@ The input to the job must be an array containing a user message with a file refe
 
 ## Output Format
 
-Always return results in JSON format. Parse the `output_text` field from the API response using `json.loads()` (Python) or `JSON.parse()` (JavaScript) and return the parsed object as structured JSON to the user or calling system. Do not return raw strings or unstructured text.
+Parse the final step's `output_text` as JSON. The response envelope contains a Markdown string in `content` and source references in `metadata.source_files`, including `file_name` and `page_ranges`.
+
+Config 7 can return an `Instance` heading for each document review. The dashboard reads the document type and review status for each instance and uses its `page_identity` to identify the source page. The Markdown may contain an `INTERNAL record` section with fenced JSON, which is displayed in Evidence.
 
 ## Authentication
 
@@ -66,8 +68,8 @@ Content-Type: application/json
 
 | Parameter  | Type   | Required | Description                                                    |
 |------------|--------|----------|----------------------------------------------------------------|
-| model      | string | Yes      | Agent ID: `agt_5gEZbL3mwPnR9ofmsZDSfU`    |
-| config_id  | string | No       | Config version ID (e.g., `"1"`). Omit to use latest.          |
+| model      | string | Yes      | Agent ID: `agt_LCcDmm5fNHW8mu5gG3ZS8W`    |
+| config_id  | string | No       | Config version ID (e.g., `"7"`). Omit to use latest.          |
 | input      | array  | Yes      | Array of input messages with file references (see below)       |
 | include    | array  | No       | `["last"]` for final step only, `["all"]` for all step results |
 
@@ -133,8 +135,8 @@ print(f"Uploaded: {file.id}")
 
 # Step 2: Create job
 job = client.responses.create(
-    model="agt_5gEZbL3mwPnR9ofmsZDSfU",  # Agent ID
-    # config_id="1",
+    model="agt_LCcDmm5fNHW8mu5gG3ZS8W",  # Agent ID
+    # config_id="7",
     include=["last"],                       # "last" = final step only, "all" = every step
     input=[{
         "role": "user",
@@ -182,8 +184,8 @@ JOB_RESPONSE=$(curl -s -X POST https://api.upstage.ai/v2/responses \
   -H "Authorization: Bearer $UPSTAGE_API_KEY" \
   -H "Content-Type: application/json" \
   -d "{
-    \"model\": \"agt_5gEZbL3mwPnR9ofmsZDSfU\",
-  "config_id": "1",
+    \"model\": \"agt_LCcDmm5fNHW8mu5gG3ZS8W\",
+    \"config_id\": \"7\",
     \"include\": [\"last\"],
     \"input\": [{
       \"role\": \"user\",
@@ -222,7 +224,7 @@ done
   "id": "job_xxxxxxxxxxxxx",
   "object": "response",
   "status": "completed",
-  "model": "agt_5gEZbL3mwPnR9ofmsZDSfU",
+  "model": "agt_LCcDmm5fNHW8mu5gG3ZS8W",
   "output": [
     {
       "type": "message",
@@ -265,7 +267,7 @@ def process_file(path):
         file = client.files.create(file=f, purpose="user_data")
 
     job = client.responses.create(
-        model="agt_5gEZbL3mwPnR9ofmsZDSfU",
+        model="agt_LCcDmm5fNHW8mu5gG3ZS8W",
         include=["last"],
         input=[{"role": "user", "content": [{"type": "input_file", "file_id": file.id}]}]
     )
@@ -311,7 +313,7 @@ Instructions for AI assistants: when a job fails, read `error` and act on it. Re
 
 ## Notes
 
-- Agent ID: `********************`
+- Agent ID: `*******`
 - Config ID: `*`
 - The API is OpenAI SDK compatible. Use the `openai` Python package with `base_url="https://api.upstage.ai/v2"`
 - Files are retained server-side until explicitly deleted

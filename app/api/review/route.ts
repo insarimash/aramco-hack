@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { maxFileBytes, validateFile, type ReviewResponse } from "../../../src/review";
-import { addReview, completeReview, currentUser, ownsReview } from "../../../src/local-store";
+import { addReview, completeReview, currentUser, getReview } from "../../../src/local-store";
 
 export const runtime = "nodejs";
 const base = "https://api.upstage.ai/v2";
@@ -106,8 +106,8 @@ export async function POST(request: Request) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: process.env.UPSTAGE_AGENT_ID?.trim() || "agt_5gEZbL3mwPnR9ofmsZDSfU",
-        config_id: process.env.UPSTAGE_CONFIG_ID?.trim() || "1",
+        model: process.env.UPSTAGE_AGENT_ID?.trim() || "agt_LCcDmm5fNHW8mu5gG3ZS8W",
+        config_id: process.env.UPSTAGE_CONFIG_ID?.trim() || "7",
         include: ["last"],
         input: [{ role: "user", content: [{ type: "input_file", file_id: fileId }] }],
       }),
@@ -116,7 +116,7 @@ export async function POST(request: Request) {
     const { id } = object(await creation.json());
     if (typeof id !== "string" || !/^[\w-]{1,256}$/.test(id)) return uncertain();
     const run = id + "." + signature(id, key);
-    await addReview(user.id, run, file.name);
+    await addReview(user.id, run, file);
     return reply({ state: "processing", run }, 202);
   } catch (cause) {
     if (creating) return uncertain();
@@ -181,9 +181,9 @@ function decodeResult(value: unknown): unknown {
 
 function readResult(job: Record<string, unknown>) {
   const candidates = new Set([
+    typeof job.content === "string" ? { content: job.content, metadata: job.metadata } : undefined,
     job.output_text,
     finalStepText(job.output),
-    typeof job.content === "string" ? { content: job.content, metadata: job.metadata } : undefined,
   ]);
   let hasText = false;
   for (const candidate of candidates) {
@@ -194,13 +194,22 @@ function readResult(job: Record<string, unknown>) {
       const envelope = object(result);
       const { content, metadata } = envelope;
       if (typeof content === "string" && Object.hasOwn(envelope, "metadata")) {
-        const findings = decodeResult(content);
-        if (!findings || typeof findings !== "object" || Array.isArray(findings)) continue;
-        result = { metadata, ...findings };
+        try {
+          const findings = decodeResult(content);
+          if (findings && typeof findings === "object" && !Array.isArray(findings)) result = { metadata, ...findings };
+        } catch {
+          if (!content.trim()) continue;
+          result = { content, metadata };
+        }
       }
       if (result !== null && typeof result === "object") return { result };
     } catch {
       // Try the final-step content when the shortcut does not contain usable JSON.
+    }
+  }
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && /^#{1,6}\s/m.test(candidate)) {
+      return { result: { content: candidate, metadata: job.metadata } };
     }
   }
   return { issue: hasText ? "returned invalid or unstructured JSON" : "returned no result text" };
@@ -220,12 +229,19 @@ const stages = ["parse", "classify", "extract", "merge", "system"];
 export async function GET(request: Request) {
   const user = await currentUser(request);
   if (!user) return error("Please sign in to view this review.", 401);
+  const token = new URL(request.url).searchParams.get("run") ?? "";
+  const saved = await getReview(user.id, token);
+  if (!saved) return error("This review does not belong to your account.", 403);
+  if (saved.failure) return error(saved.failure, 422);
+  if (saved.completedAt) return reply({ state: "completed", result: saved.result });
   const key = process.env.UPSTAGE_API_KEY?.trim();
   if (!key) return error("The server needs an Upstage API key to check this job.", 503);
-  const token = new URL(request.url).searchParams.get("run") ?? "";
   const id = readRun(token, key);
   if (!id) return error("This job reference is invalid. Check the job in Studio.", 400);
-  if (!await ownsReview(user.id, token)) return error("This review does not belong to your account.", 403);
+  async function fail(message: string, delay?: number) {
+    await completeReview(user!.id, token, undefined, message);
+    return error(message, 422, { delay });
+  }
   try {
     const response = await requestUpstage("/responses/" + id + "?include[]=last", key, {}, 20_000);
     if (!response.ok) return upstreamError(response, "poll");
@@ -236,16 +252,16 @@ export async function GET(request: Request) {
         await completeReview(user.id, token, result);
         return reply({ state: "completed", result });
       }
-      return error("The job finished and " + issue + ". Check the final step in Upstage Studio for job " + id + ".", 422);
+      return await fail("The job finished and " + issue + ". Check the final step in Upstage Studio for job " + id + ".");
     }
-    if (job.status === "cancelled") return error("Upstage cancelled this job.", 422);
+    if (job.status === "cancelled") return await fail("Upstage cancelled this job.");
     if (job.status === "failed") {
       const failure = object(job.error);
       const code = typeof failure.code === "string" ? failure.code : "";
       const step = typeof failure.step === "string" && stages.includes(failure.step) ? " Step: " + failure.step + "." : "";
       const retryable = ["rate_limit_exceeded", "timeout_error", "server_error"].includes(code);
       const message = Object.hasOwn(failureMessages, code) ? failureMessages[code] : "The workflow failed. Check this run in Studio.";
-      return error(message + step, 422, retryable ? { delay: 3 } : {});
+      return await fail(message + step, retryable ? 3 : undefined);
     }
     if (typeof job.status !== "string" || !job.status) return error("Upstage returned no job status.", 502, { retry: true });
     return reply({ state: "processing", run: token });

@@ -1,9 +1,9 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Fertilizer CBAM | Aramco Hackathon",
-  description: "Review fertilizer shipment documents with the Upstage workflow.",
+  title: "KUC | Carbon compliance review",
+  description: "Check shipment documents and review supporting evidence with Know Your Carbon.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

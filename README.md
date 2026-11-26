@@ -1,4 +1,4 @@
-# Fertilizer CBAM review
+# KUC carbon compliance review
 
 A single-page Aramco hackathon demo for reviewing fertilizer shipment documents with the Upstage Studio agent.
 
@@ -13,22 +13,22 @@ npm run dev
 
 Open http://localhost:3000. Put the real key in the ignored `.env.local` file and restart the server after changing the environment. If the file is missing, copy `.env.example` to `.env.local` first.
 
-Create an account on the sign-in page to run reviews. Accounts, password hashes, sessions, and completed workflow results are stored in the ignored `local-data/store.json` file. Each signed-in user sees only their own saved reviews. Keep this directory private and back it up if the local results matter. The JSON store is intended for a single local Node.js server with a persistent disk; it is not suitable for serverless deployment or multiple server processes. Uploaded document bytes are not saved locally.
-Set `CBAM_DATA_DIR` before starting the server if you want the JSON file in another directory.
+Create an account on the sign-in page to run reviews. Accounts, password hashes, sessions, and workflow results are stored in the ignored `local-data/store.json` file. New runs retain their source documents in `local-data/sources` so signed-in owners can reopen them from Evidence. Keep this directory private. The store is intended for a single Node.js server with a persistent disk.
+Set `CBAM_DATA_DIR` before starting the server to use a different directory for records and source documents.
 
 | Variable | Server-side value |
 | --- | --- |
 | `UPSTAGE_API_KEY` | Required. Get your key in [Upstage Studio](https://console.upstage.ai/api-keys). |
 | `UPSTAGE_AGENT_ID` | Optional. Defaults to the agent ID in [workflow-doc.md](workflow-doc.md). |
-| `UPSTAGE_CONFIG_ID` | Optional. Defaults to config 1, as shown in the cURL example in [workflow-doc.md](workflow-doc.md). |
+| `UPSTAGE_CONFIG_ID` | Optional. Defaults to config 7, as shown in the cURL example in [workflow-doc.md](workflow-doc.md). |
 
-If you deployed the previous workflow with explicit agent or config overrides, clear those overrides to use the new defaults or update them to the new agent and config 1.
+If you deployed the previous workflow with explicit agent or config overrides, clear those overrides to use the new defaults or update them to the current agent and config 7.
 
 The API base URL is fixed at `https://api.upstage.ai/v2`. Upload one file per review. The app checks its extension, nonzero size, and 500 MB limit in the browser and on the server. Upstage checks the document contents, the 1,000-page limit and the 10-minute video limit.
 
 ## Workflow
 
-The app uploads the document to `/files`, starts a job through `/responses`, and polls the original job about every 2.5 seconds. Polling backs off on transient failures and can be resumed. The same browser tab can resume a known job after reload. Review results are the parsed final-step JSON. The contract specifies the response envelope and leaves the findings fields open, so the page prioritizes recognizable decision, reasons, evidence, missing documents and next action fields when present. A finished job may contain a negative decision.
+The app uploads the document to `/files`, starts a job through `/responses`, and polls the original job about every 2.5 seconds. Polling backs off on transient failures and can be resumed from History. Results appear below the review steps. Open a result to see the Markdown case record and source pages, or reopen the same result from History. The dashboard also displays structured findings from earlier workflows. Terminal failures are recorded in History.
 
 When a known job ends with a transient workflow failure, the app enables a manual rerun after a backoff. If a create request loses its response or returns an ambiguous error, check Studio before enabling another submission. The contract supplies neither a job-creation idempotency key nor a way to recover a lost job ID from the upload alone.
 

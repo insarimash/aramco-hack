@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { accept, validateFile, type ReviewResponse } from "../src/review";
 import type { SavedReview } from "../src/local-store";
+import Image from "next/image";
+import { badgeClass, Results, reviewStatus } from "./review-results";
 
 const storageKey = "cbam-active-review";
 const pending = "pending";
@@ -69,6 +71,20 @@ function Findings({ result }: { result: unknown }) {
 
 type Phase = "idle" | "uploading" | "processing" | "paused" | "unknown" | "completed" | "error";
 
+function Logo() {
+  return <div className="logo"><Image src="/kuc-logo.png" width={2172} height={724} alt="KUC — Know Your Carbon" priority /></div>;
+}
+
+function Icon({ name }: { name: "review" | "history" | "logout" | "upload" }) {
+  const paths = {
+    review: "M6 3h8l4 4v14H6z M14 3v5h4 M9 14l2 2 4-4",
+    history: "M4 11a8 8 0 1 1 1 5 M4 5v6h6 M12 8v4l3 2",
+    logout: "M10 4H4v16h6 M8 12h12m-4-4 4 4-4 4",
+    upload: "M12 16V4m-4 4 4-4 4 4M5 15v5h14v-5",
+  };
+  return <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d={paths[name]} /></svg>;
+}
+
 export default function Page() {
   const [user, setUser] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(false);
@@ -78,6 +94,13 @@ export default function Page() {
   const [authError, setAuthError] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [reviews, setReviews] = useState<SavedReview[]>([]);
+  const [historyError, setHistoryError] = useState("");
+  const [historyReady, setHistoryReady] = useState(false);
+  const [historyAttempt, setHistoryAttempt] = useState(0);
+  const [view, setView] = useState<"review" | "history">("review");
+  const [savedRun, setSavedRun] = useState<string>();
+  const [completedRun, setCompletedRun] = useState("");
+  const [evidence, setEvidence] = useState<number | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const locked = useRef(false);
   const knownFailures = useRef(0);
@@ -91,11 +114,22 @@ export default function Page() {
   const [run, setRun] = useState("");
   const [retryAt, setRetryAt] = useState(0);
 
-  useEffect(() => { fetch("/api/auth").then((response) => response.json()).then((data) => setUser(data.user?.email ?? null)).finally(() => setAuthReady(true)); }, []);
+  useEffect(() => { fetch("/api/auth").then((response) => response.json()).then((data) => setUser(data.user?.email ?? null)).catch(() => setAuthError("Could not reach the server.")).finally(() => setAuthReady(true)); }, []);
   useEffect(() => {
     if (!user) return;
-    fetch("/api/history").then((response) => response.json()).then((data) => setReviews(data.reviews ?? []));
-  }, [user, phase]);
+    const controller = new AbortController();
+    fetch("/api/history", { signal: controller.signal }).then(async (response) => {
+      if (!response.ok) throw new Error("History request failed");
+      const data = await response.json();
+      if (controller.signal.aborted) return;
+      setReviews(data.reviews ?? []);
+      setHistoryError("");
+      setHistoryReady(true);
+    }).catch(() => {
+      if (!controller.signal.aborted) setHistoryError("Could not load review history.");
+    });
+    return () => controller.abort();
+  }, [user, phase, view, run, historyAttempt]);
 
   async function authenticate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setAuthBusy(true); setAuthError("");
@@ -103,13 +137,23 @@ export default function Page() {
       const response = await fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: authMode, email, password }) });
       const data = await response.json();
       if (!response.ok) { setAuthError(data.error); return; }
-      setPassword(""); setUser(data.user.email);
+      setPassword(""); setView("review"); setUser(data.user.email);
     } catch { setAuthError("Could not reach the server."); }
     finally { setAuthBusy(false); }
   }
   async function signOut() {
-    await fetch("/api/auth", { method: "DELETE" });
-    setUser(null); setReviews([]); setResult(undefined); setRun(""); setPhase("idle"); storeRun(null);
+    if (locked.current) return;
+    try {
+      setAuthError("");
+      const response = await fetch("/api/auth", { method: "DELETE" });
+      if (!response.ok) throw new Error("Logout failed");
+      setUser(null); setReviews([]); setResult(undefined); setRun(""); setPhase("idle"); storeRun(null);
+      setReady(false); setFile(undefined); setValidation(""); setMessage(""); setRetryAt(0);
+      setSavedRun(undefined); setEvidence(null); setCompletedRun(""); setHistoryReady(false); setHistoryError("");
+      knownFailures.current = 0;
+    } catch {
+      setAuthError("Could not log out. Try again.");
+    }
   }
 
   useEffect(() => {
@@ -124,6 +168,8 @@ export default function Page() {
           setRun(saved);
           setPhase("processing");
         }
+      } catch {
+        // History can still recover a known run when session storage is unavailable.
       } finally {
         setReady(true);
       }
@@ -163,6 +209,7 @@ export default function Page() {
         schedule(2500);
       } else if (data.state === "completed") {
         storeRun(null);
+        setCompletedRun(run);
         setRun("");
         setResult(data.result);
         knownFailures.current = 0;
@@ -191,6 +238,7 @@ export default function Page() {
   }, [phase, run]);
 
   const busy = phase === "uploading" || phase === "processing";
+  const submitting = busy && !run;
   const canSelect = ready && !busy && phase !== "paused" && phase !== "unknown";
 
   function choose(next?: File) {
@@ -199,6 +247,7 @@ export default function Page() {
     setPhase("idle");
     setMessage("");
     setResult(undefined);
+    setEvidence(null);
     knownFailures.current = 0;
   }
 
@@ -211,6 +260,7 @@ export default function Page() {
     setProgress(undefined);
     setMessage("");
     setResult(undefined);
+    setEvidence(null);
 
     const body = new FormData();
     body.set("file", file);
@@ -257,55 +307,137 @@ export default function Page() {
     error: "Review needs attention",
   }[phase];
 
-  return (
-    <>
-      <header className="top"><div className="wrap brand"><span className="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M5 18 18 5M7 16C2 11 6 5 19 5c0 13-6 17-11 12"/><path d="M11 12v-3m1 3h4"/></svg></span><span>Aramco Hackathon</span>{user && <div className="account"><span>{user}</span><button className="quiet" onClick={signOut}>Sign out</button></div>}</div></header>
-      <main className="wrap">
-        {!authReady ? <p>Loading account…</p> : !user ? <section className="panel auth-panel"><h1>{authMode === "login" ? "Sign in" : "Create account"}</h1><p>Save your CBAM review results on this computer.</p><form onSubmit={authenticate}><label htmlFor="email">Email</label><input id="email" type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} /><label htmlFor="password">Password</label><input id="password" type="password" minLength={8} maxLength={128} required autoComplete={authMode === "login" ? "current-password" : "new-password"} value={password} onChange={(event) => setPassword(event.target.value)} />{authError && <p className="notice" role="alert">{authError}</p>}<button className="primary" disabled={authBusy}>{authMode === "login" ? "Sign in" : "Create account"}</button></form><button className="auth-switch" onClick={() => { setAuthMode(authMode === "login" ? "register" : "login"); setAuthError(""); }}>{authMode === "login" ? "Need an account? Register" : "Already have an account? Sign in"}</button></section> : <>
-        <div className="intro"><h1>Fertilizer CBAM review</h1><p>Upload a shipment document and review the findings from your Upstage workflow.</p></div>
-        <div className="workspace">
-          <section className="panel" aria-labelledby="upload-heading">
-            <h2 id="upload-heading">Shipment document</h2>
-            <form onSubmit={submit}>
-              <div className="file-area">
-                <span className="file-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M12 16V4m-4 4 4-4 4 4M5 15v5h14v-5"/></svg></span>
-                <label htmlFor="document">Choose one file</label>
-                <input id="document" ref={input} type="file" accept={accept} disabled={!canSelect}
-                  aria-describedby="limits formats" aria-invalid={Boolean(validation)}
-                  onChange={(event) => {
-                    const next = event.currentTarget.files?.[0];
-                    if (next) choose(next);
-                    event.currentTarget.value = "";
-                  }} />
-                <p id="limits">Up to 500 MB · 1,000 pages · 10 minutes for video</p>
-              </div>
-              <details className="formats"><summary>Supported formats</summary><p id="formats">PDF, JPEG, PNG, BMP, TIFF, HEIC, DOCX, PPTX, XLSX, MP4, MOV, M4V, AVI, MKV, WEBM, WMV, FLV, MPG, MPEG, 3GP</p></details>
-              {file && <div className="selected"><div><strong>{file.name}</strong><small>{sizeLabel(file.size)}</small></div>
-                <button type="button" className="quiet" disabled={!canSelect} onClick={() => { choose(); input.current?.focus(); }}>Remove</button></div>}
-              {validation && <p className="notice" role="alert">{validation}</p>}
-              <button className="primary" type="submit" disabled={!canSelect || !file || !!validation || !!retryAt}>
-                {busy ? "Review in progress" : retryAt ? "Waiting before retry" : phase === "error" ? "Run review again" : "Run CBAM review"}
-              </button>
-            </form>
-          </section>
-          <section className="panel results" aria-labelledby="results-heading">
-            <h2 id="results-heading">Workflow findings</h2>
-            <div className="status" role="status" aria-live="polite"><span className={"dot " + phase} aria-hidden="true" />{status}</div>
-            {phase === "idle" && <div className="empty"><p>Your findings will appear here after the workflow finishes.</p></div>}
-            {busy && <div className="empty"><p>{message || (run ? "Upstage is reviewing your document. This may take a few minutes." : "Keep this tab open while the document is transferred.")}</p></div>}
-            {!busy && message && <p className="notice" role="alert">{message}</p>}
-            {phase === "paused" && <button className="secondary" disabled={!!retryAt} onClick={() => { setMessage(""); setPhase("processing"); }}>Resume status checks</button>}
-            {phase === "unknown" && <button className="secondary" onClick={() => {
-              if (window.confirm("Continue only after checking Studio and resolving any existing job. Enable a new submission?")) {
-                storeRun(null); setPhase("idle"); setMessage("");
-              }
-            }}>I checked Studio</button>}
-            {phase === "completed" && <Findings result={result} />}
-          </section>
-        </div>
-        <section className="panel history"><h2>Saved reviews</h2>{reviews.length === 0 ? <p>No saved reviews yet.</p> : <ul>{reviews.map((item) => <li key={item.run}><div><strong>{item.fileName}</strong><small>{new Date(item.createdAt).toLocaleString()} · {item.completedAt ? "Completed" : "Processing"}</small></div>{item.completedAt ? <button className="secondary" onClick={() => { setResult(item.result); setPhase("completed"); }}>View result</button> : <button className="secondary" onClick={() => { storeRun(item.run); setRun(item.run); setPhase("processing"); }}>Resume</button>}</li>)}</ul>}</section>
-        </>}
-      </main>
-    </>
-  );
+  function navigate(next: "review" | "history") {
+    setView(next);
+    setSavedRun(undefined);
+    setEvidence(null);
+  }
+
+  function resume(item: SavedReview) {
+    if (locked.current) return;
+    setFile(undefined);
+    setValidation("");
+    setResult(undefined);
+    setMessage("");
+    setRetryAt(0);
+    storeRun(item.run);
+    setRun(item.run);
+    setPhase("processing");
+    navigate("review");
+  }
+
+  const saved = reviews.find((item) => item.run === savedRun);
+  const current = reviews.find((item) => item.run === completedRun);
+  const displayed = view === "history" ? saved?.result : phase === "completed" ? result : undefined;
+  const displayedFile = view === "history" ? saved : current;
+  const activeStep = phase === "completed" ? 2 : run || phase === "processing" ? 1 : 0;
+
+  if (!authReady || !user) return <main className="auth-shell">
+    <section className="panel auth-panel">
+      <Logo />
+      {!authReady ? <p role="status">Loading account…</p> : <>
+        <h1>{authMode === "login" ? "Sign in" : "Create account"}</h1>
+        <p>Access your carbon compliance reviews.</p>
+        <form onSubmit={authenticate}>
+          <label htmlFor="email">Email</label>
+          <input id="email" type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} />
+          <label htmlFor="password">Password</label>
+          <input id="password" type="password" minLength={8} maxLength={128} required autoComplete={authMode === "login" ? "current-password" : "new-password"} value={password} onChange={(event) => setPassword(event.target.value)} />
+          {authError && <p className="notice" role="alert">{authError}</p>}
+          <button className="primary" disabled={authBusy}>{authMode === "login" ? "Sign in" : "Create account"}</button>
+        </form>
+        <button className="auth-switch" onClick={() => { setAuthMode(authMode === "login" ? "register" : "login"); setAuthError(""); }}>
+          {authMode === "login" ? "Need an account? Register" : "Already have an account? Sign in"}
+        </button>
+      </>}
+    </section>
+  </main>;
+
+  return <div className={"dashboard" + (evidence !== null && displayed !== undefined ? " with-evidence" : "")}>
+    <aside className="sidebar">
+      <Logo />
+      <nav aria-label="Workspace">
+        <button type="button" aria-current={view === "review" ? "page" : undefined} onClick={() => navigate("review")}><Icon name="review" />Review</button>
+        <button type="button" aria-current={view === "history" ? "page" : undefined} onClick={() => navigate("history")}><Icon name="history" />History</button>
+        <button type="button" disabled={submitting} onClick={signOut}><Icon name="logout" />Log out</button>
+      </nav>
+      <small className="account-email">{user}</small>
+    </aside>
+    <main className="main-content">
+      {authError && <p className="notice" role="alert">{authError}</p>}
+      {view === "review" ? <>
+        <header className="page-heading">
+          <h1>Carbon compliance review</h1>
+          <p>{phase === "completed" ? current?.fileName ?? file?.name ?? "Document review" : "Check shipment documents and inspect the supporting evidence."}</p>
+        </header>
+        <ol className="steps" aria-label="Review progress">
+          {["Upload", "Review data", "Results"].map((step, index) => <li key={step} className={index <= activeStep ? "reached" : ""} aria-current={index === activeStep ? "step" : undefined}>
+            <span className="step-circle" aria-hidden="true">{index < activeStep || phase === "completed" ? "✓" : index + 1}</span><span>{step}</span>
+          </li>)}
+        </ol>
+        {phase !== "completed" ? <section className="panel upload-panel" aria-labelledby="upload-heading">
+          <h2 id="upload-heading">Attach documents as a single file</h2>
+          <p>Bundle the documents for this review before uploading.</p>
+          <form onSubmit={submit}>
+            <div className="file-area">
+              <span className="file-icon"><Icon name="upload" /></span>
+              <label htmlFor="document" className="secondary file-label" aria-disabled={!canSelect}>Choose file</label>
+              <input id="document" className="file-input" ref={input} type="file" accept={accept} disabled={!canSelect}
+                aria-describedby="limits" aria-invalid={Boolean(validation)} onChange={(event) => {
+                  const next = event.currentTarget.files?.[0];
+                  if (next) choose(next);
+                  event.currentTarget.value = "";
+                }} />
+              <p id="limits">One file · Up to 500 MB · 1,000 pages</p>
+            </div>
+            <details className="formats"><summary>Supported formats</summary><p>PDF, JPEG, PNG, BMP, TIFF, HEIC, DOCX, PPTX, XLSX, MP4, MOV, M4V, AVI, MKV, WEBM, WMV, FLV, MPG, MPEG, 3GP. Videos can be up to 10 minutes.</p></details>
+            {file && <div className="selected"><div><strong>{file.name}</strong><small>{sizeLabel(file.size)}</small></div>
+              <button type="button" className="quiet" disabled={!canSelect} onClick={() => { choose(); input.current?.focus(); }}>Remove</button></div>}
+            {validation && <p className="notice" role="alert">{validation}</p>}
+            <button className="primary" type="submit" disabled={!canSelect || !file || !!validation || !!retryAt}>
+              {busy ? "Review in progress" : retryAt ? "Waiting before retry" : phase === "error" ? "Run review again" : "Run review"}
+            </button>
+          </form>
+        </section> : <div className="review-actions">
+          <button type="button" className="secondary" onClick={() => { choose(); setCompletedRun(""); }}>New review</button>
+          <button type="button" className="secondary" onClick={() => navigate("history")}>View history</button>
+        </div>}
+        {phase !== "idle" && <div className="run-status">
+          <p className="status" role="status">{status}</p>
+          {busy && <p>{message || (run ? "Upstage is reviewing your document. This may take a few minutes." : "Keep this tab open while the document is transferred.")}</p>}
+          {!busy && message && <p className="notice" role="alert">{message}</p>}
+          {phase === "paused" && <button className="secondary" disabled={!!retryAt} onClick={() => { setMessage(""); setPhase("processing"); }}>Resume status checks</button>}
+          {phase === "unknown" && <button className="secondary" onClick={() => {
+            if (window.confirm("Continue only after checking Studio and resolving any existing job. Enable a new submission?")) {
+              storeRun(null); setPhase("idle"); setMessage("");
+            }
+          }}>I checked Studio</button>}
+        </div>}
+      </> : <>
+        <header className="page-heading"><h1>Review history</h1><p>Open past results or check an unfinished review.</p></header>
+        {historyError && <div><p className="notice" role="alert">{historyError}</p><button type="button" className="secondary" onClick={() => setHistoryAttempt((value) => value + 1)}>Retry history</button></div>}
+        {saved && <div className="history-detail">
+          <button type="button" className="secondary" onClick={() => navigate("history")}>Back to history</button>
+          <h2>{saved.fileName}</h2><p>{new Date(saved.createdAt).toLocaleString()}</p>
+          {saved.failure && <p className="notice">{saved.failure}</p>}
+        </div>}
+        {!saved && <section className="panel history" aria-label="Saved reviews">
+          {!historyReady && !historyError && <p role="status">Loading reviews…</p>}
+          {historyReady && reviews.length === 0 && <p>No saved reviews yet.</p>}
+          {reviews.length > 0 && <ul>{reviews.map((item) => {
+            const outcome = item.failure ? "Run ended" : item.completedAt ? reviewStatus(item.result) : "Processing";
+            return <li key={item.run}>
+              <div className="history-file"><strong>{item.fileName}</strong><small>{new Date(item.createdAt).toLocaleString()}</small></div>
+              <span className={badgeClass(item.failure ? "failed" : outcome)}>{outcome}</span>
+              {item.completedAt ? <button className="secondary" onClick={() => { setSavedRun(item.run); setEvidence(null); }}>{item.failure ? "View details" : "View result"}</button>
+                : <button className="secondary" disabled={submitting} onClick={() => resume(item)}>Check run</button>}
+            </li>;
+          })}</ul>}
+        </section>}
+      </>}
+      {displayed !== undefined && <Results result={displayed} fileName={displayedFile?.fileName ?? file?.name ?? ""}
+        sourceUrl={displayedFile?.hasSource ? "/api/review/source?run=" + encodeURIComponent(displayedFile.run) : undefined}
+        selected={evidence} onSelect={setEvidence} fallback={<Findings result={displayed} />} />}
+    </main>
+  </div>;
 }
