@@ -62,10 +62,8 @@ export async function register(email: string, password: string) {
     const passwordHash = (await scrypt(password, salt, 64) as Buffer).toString("hex");
     const user = { id: randomBytes(16).toString("hex"), email, salt, passwordHash };
     store.users.push(user);
-    const token = randomBytes(32).toString("hex");
-    store.sessions.push({ userId: user.id, tokenHash: digest(token), expires: Date.now() + lifetime });
     await write(store);
-    return { token, email };
+    return { email };
   });
 }
 export async function login(email: string, password: string) {

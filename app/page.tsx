@@ -92,6 +92,7 @@ export default function Page() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
+  const [authNotice, setAuthNotice] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [reviews, setReviews] = useState<SavedReview[]>([]);
   const [historyError, setHistoryError] = useState("");
@@ -132,11 +133,15 @@ export default function Page() {
   }, [user, phase, view, run, historyAttempt]);
 
   async function authenticate(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setAuthBusy(true); setAuthError("");
+    event.preventDefault(); setAuthBusy(true); setAuthError(""); setAuthNotice("");
     try {
       const response = await fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: authMode, email, password }) });
       const data = await response.json();
       if (!response.ok) { setAuthError(data.error); return; }
+      if (authMode === "register") {
+        setAuthMode("login"); setPassword(""); setAuthNotice("Account created. Sign in to continue.");
+        return;
+      }
       setPassword(""); setView("review"); setUser(data.user.email);
     } catch { setAuthError("Could not reach the server."); }
     finally { setAuthBusy(false); }
@@ -343,10 +348,11 @@ export default function Page() {
           <input id="email" type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} />
           <label htmlFor="password">Password</label>
           <input id="password" type="password" minLength={8} maxLength={128} required autoComplete={authMode === "login" ? "current-password" : "new-password"} value={password} onChange={(event) => setPassword(event.target.value)} />
+          {authNotice && <p className="notice" role="status">{authNotice}</p>}
           {authError && <p className="notice" role="alert">{authError}</p>}
           <button className="primary" disabled={authBusy}>{authMode === "login" ? "Sign in" : "Create account"}</button>
         </form>
-        <button className="auth-switch" onClick={() => { setAuthMode(authMode === "login" ? "register" : "login"); setAuthError(""); }}>
+        <button className="auth-switch" onClick={() => { setAuthMode(authMode === "login" ? "register" : "login"); setAuthError(""); setAuthNotice(""); }}>
           {authMode === "login" ? "Need an account? Register" : "Already have an account? Sign in"}
         </button>
       </>}

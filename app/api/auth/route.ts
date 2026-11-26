@@ -11,8 +11,13 @@ export async function POST(request: Request) {
     return Response.json({ error: "Enter a valid email and a password of 8 to 128 characters." }, { status: 400 });
   }
   if (body.action !== "register" && body.action !== "login") return Response.json({ error: "Invalid action." }, { status: 400 });
-  const account = body.action === "register" ? await register(email, password) : await login(email, password);
-  if (!account) return Response.json({ error: body.action === "register" ? "An account with this email already exists." : "Incorrect email or password." }, { status: body.action === "register" ? 409 : 401 });
+  if (body.action === "register") {
+    const account = await register(email, password);
+    if (!account) return Response.json({ error: "An account with this email already exists." }, { status: 409 });
+    return Response.json({ registered: true }, { headers: noStore });
+  }
+  const account = await login(email, password);
+  if (!account) return Response.json({ error: "Incorrect email or password." }, { status: 401 });
   return Response.json({ user: { email: account.email } }, { headers: { ...noStore, "Set-Cookie": sessionCookie(account.token, request) } });
 }
 export async function DELETE(request: Request) {

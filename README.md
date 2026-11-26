@@ -13,7 +13,7 @@ npm run dev
 
 Open http://localhost:3000. Put the real key in the ignored `.env.local` file and restart the server after changing the environment. If the file is missing, copy `.env.example` to `.env.local` first.
 
-Create an account on the sign-in page to run reviews. Accounts, password hashes, sessions, and workflow results are stored in the ignored `local-data/store.json` file. New runs retain their source documents in `local-data/sources` so signed-in owners can reopen them from Evidence. Keep this directory private. The store is intended for a single Node.js server with a persistent disk.
+Create an account on the sign-in page, then sign in to run reviews. Accounts, password hashes, sessions, and workflow results are stored in the ignored `local-data/store.json` file. New runs retain their source documents in `local-data/sources` so signed-in owners can reopen them from Evidence. Keep this directory private. The store is intended for a single Node.js server with a persistent disk.
 Set `CBAM_DATA_DIR` before starting the server to use a different directory for records and source documents.
 
 | Variable | Server-side value |
