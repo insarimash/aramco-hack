@@ -124,13 +124,81 @@ export async function POST(request: Request) {
   }
 }
 
-function resultText(job: Record<string, unknown>) {
-  if (typeof job.output_text === "string" && job.output_text.trim()) return job.output_text;
-  if (!Array.isArray(job.output)) return undefined;
-  return job.output.flatMap((item) => {
+function finalStepText(output: unknown) {
+  if (!Array.isArray(output)) return undefined;
+  const content = output.flatMap((item) => {
     const content = object(item).content;
     return Array.isArray(content) ? content : [];
-  }).map(object).filter((item) => item.type === "output_text" && typeof item.text === "string").at(-1)?.text as string | undefined;
+  });
+  return content.map(object).findLast((item) =>
+    item.type === "output_text" && typeof item.text === "string" && item.text.trim()
+  )?.text;
+}
+
+function readLeadingJson(text: string): number {
+  let depth = 0;
+  let quoted = false;
+  for (let index = 0; index < text.length; index++) {
+    const character = text[index];
+    if (quoted) {
+      if (character === "\\") index++;
+      else if (character === '"') quoted = false;
+    } else if (character === '"') {
+      quoted = true;
+    } else if (character === "{" || character === "[") {
+      depth++;
+    } else if (character === "}" || character === "]") {
+      depth--;
+      if (depth === 0) return index + 1;
+    }
+  }
+  return text.length;
+}
+
+function parseResult(text: string): unknown {
+  const trimmed = text.trim();
+  const fenced = /^```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n```(?=\s|$)/i.exec(trimmed);
+  const json = fenced?.[1] ?? trimmed;
+  const end = !fenced && json.startsWith("{") ? readLeadingJson(json) : json.length;
+  const parsed: unknown = JSON.parse(json.slice(0, end));
+  const remainder = fenced ? trimmed.slice(fenced[0].length) : json.slice(end);
+  if (remainder && !/^\s*\r?\n/.test(remainder)) throw new SyntaxError("Expected a separate summary");
+  const summary = remainder.trim();
+  return summary && parsed && typeof parsed === "object" && !Array.isArray(parsed)
+    ? { summary, ...parsed }
+    : parsed;
+}
+
+function decodeResult(value: unknown): unknown {
+  const parsed = typeof value === "string" ? parseResult(value) : value;
+  return typeof parsed === "string" ? parseResult(parsed) : parsed;
+}
+
+function readResult(job: Record<string, unknown>) {
+  const candidates = new Set([
+    job.output_text,
+    finalStepText(job.output),
+    typeof job.content === "string" ? { content: job.content, metadata: job.metadata } : undefined,
+  ]);
+  let hasText = false;
+  for (const candidate of candidates) {
+    if (candidate == null || (typeof candidate === "string" && !candidate.trim())) continue;
+    hasText = true;
+    try {
+      let result = decodeResult(candidate);
+      const envelope = object(result);
+      const { content, metadata } = envelope;
+      if (typeof content === "string" && Object.hasOwn(envelope, "metadata")) {
+        const findings = decodeResult(content);
+        if (!findings || typeof findings !== "object" || Array.isArray(findings)) continue;
+        result = { metadata, ...findings };
+      }
+      if (result !== null && typeof result === "object") return { result };
+    } catch {
+      // Try the final-step content when the shortcut does not contain usable JSON.
+    }
+  }
+  return { issue: hasText ? "returned invalid or unstructured JSON" : "returned no result text" };
 }
 
 const failureMessages: Record<string, string> = {
@@ -155,13 +223,9 @@ export async function GET(request: Request) {
     if (!response.ok) return upstreamError(response, "poll");
     const job = object(await response.json());
     if (job.status === "completed") {
-      try {
-        const result: unknown = JSON.parse(resultText(job) ?? "");
-        if (result === null || typeof result !== "object") throw new Error("Expected structured output");
-        return reply({ state: "completed", result });
-      } catch {
-        return error("The job finished, but its result was missing or invalid JSON. Check the output in Studio.", 422);
-      }
+      const { result, issue } = readResult(job);
+      if (result !== undefined) return reply({ state: "completed", result });
+      return error("The job finished and " + issue + ". Check the final step in Upstage Studio for job " + id + ".", 422);
     }
     if (job.status === "cancelled") return error("Upstage cancelled this job.", 422);
     if (job.status === "failed") {

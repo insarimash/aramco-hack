@@ -40,9 +40,9 @@ function Value({ value, depth = 0 }: { value: unknown; depth?: number }) {
 
 const priority = [
   ["decision", "verdict", "validationstatus", "compliancestatus", "status", "valid", "passed", "isvalid", "iscompliant"],
-  ["reasons", "reason", "summary"],
+  ["reasons", "reason", "reasoncodes", "summary"],
   ["evidence", "sourcepages", "sources"],
-  ["missingdocuments", "missingdocument"],
+  ["missingdocuments", "missingdocument", "documentsfound"],
   ["nextaction", "nextactions", "recommendations"],
 ];
 
