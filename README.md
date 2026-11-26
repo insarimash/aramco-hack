@@ -24,7 +24,7 @@ Set `CBAM_DATA_DIR` before starting the server to use a different directory for 
 
 If you deployed the previous workflow with explicit agent or config overrides, clear those overrides to use the new defaults or update them to the current agent and config 7.
 
-The API base URL is fixed at `https://api.upstage.ai/v2`. Upload one file per review. The app checks its extension, nonzero size, and 500 MB limit in the browser and on the server. Upstage checks the document contents, the 1,000-page limit and the 10-minute video limit.
+The API base URL is fixed at `https://api.upstage.ai/v2`. Upload one PDF per review, combining the five documents listed in [instruction.md](instruction.md). The app checks its extension, nonzero size, and 500 MB limit in the browser and on the server. Upstage checks the document contents and the 1,000-page limit.
 
 ## Workflow
 

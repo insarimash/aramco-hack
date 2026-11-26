@@ -8,6 +8,13 @@ import { badgeClass, Results, reviewStatus } from "./review-results";
 
 const storageKey = "cbam-active-review";
 const pending = "pending";
+const requiredDocuments = [
+  { name: "Monthly Production Report", fields: ["Producer name, installation ID, location, and reporting period", "Production method, product purity, and total monthly ammonia production (tonnes)", "Natural gas feed and fuel use (GJ, LHV), gas emission factor (t CO₂/TJ), and electricity use (MWh)", "Daily production and gas consumption records"] },
+  { name: "Bill of Lading", fields: ["Bill of lading and cargo lot numbers", "Shipper, consignee, product description, and CN/HS code", "Cargo quantity (metric tonnes), loading and discharge ports, and shipment date", "Production installation ID and production period"] },
+  { name: "Certificate of Origin", fields: ["Certificate number, exporter, and consignee", "Countries of origin and destination, product description, and CN/HS code", "Cargo quantity, producing installation ID, and bill of lading reference"] },
+  { name: "Electricity Invoice", fields: ["Supplier, customer, invoice number, billing period, and production facility", "Total electricity use (MWh) and grid emission factor (t CO₂/MWh)", "Renewable energy certificate or power purchase agreement (PPA) status"] },
+  { name: "CO₂ Capture & Storage Report", fields: ["Operator, installation ID, reporting period, and CO₂ capture source", "Storage location and method", "CO₂ permanently stored (tonnes) and transferred for utilization, including urea production (tonnes)", "Daily CO₂ measurement records"] },
+];
 
 function storeRun(value: string | null) {
   try {
@@ -382,8 +389,28 @@ export default function Page() {
           </li>)}
         </ol>
         {phase !== "completed" ? <section className="panel upload-panel" aria-labelledby="upload-heading">
-          <h2 id="upload-heading">Attach documents as a single file</h2>
-          <p>Bundle the documents for this review before uploading.</p>
+          <h2 id="upload-heading">Upload your cargo document bundle</h2>
+          <p>Combine all five documents below into one readable PDF for the same cargo or its associated production facility and period.</p>
+          <details className="input-guide" open>
+            <summary>What to include in the PDF</summary>
+            <div className="document-grid">
+              {requiredDocuments.map((document, index) => <section className="document-card" key={document.name}>
+                <h3><span aria-hidden="true">{index + 1}</span>{document.name}</h3>
+                <ul>{document.fields.map((field) => <li key={field}>{field}</li>)}</ul>
+              </section>)}
+            </div>
+            <div className="consistency-guide">
+              <h3>Before you upload</h3>
+              <ul>
+                <li>Match installation IDs, product codes, shipment references, and cargo quantities across relevant documents.</li>
+                <li>Match the production, electricity, and carbon capture reporting periods.</li>
+                <li>Clearly distinguish monthly production from the quantity in this cargo.</li>
+                <li>Include units for every number. State zero explicitly; do not fill gaps with assumed values.</li>
+              </ul>
+              <p>Missing documents or required information will make the bundle incomplete, so it cannot receive a definitive compliance or subsidy eligibility assessment.</p>
+              <p>Suggested filename: <code>Cargo_Lot_[ID]_documents.pdf</code></p>
+            </div>
+          </details>
           <form onSubmit={submit}>
             <div className="file-area">
               <span className="file-icon"><Icon name="upload" /></span>
@@ -394,9 +421,8 @@ export default function Page() {
                   if (next) choose(next);
                   event.currentTarget.value = "";
                 }} />
-              <p id="limits">One file · Up to 500 MB · 1,000 pages</p>
+              <p id="limits">One PDF containing all five documents · Up to 500 MB · 1,000 pages</p>
             </div>
-            <details className="formats"><summary>Supported formats</summary><p>PDF, JPEG, PNG, BMP, TIFF, HEIC, DOCX, PPTX, XLSX, MP4, MOV, M4V, AVI, MKV, WEBM, WMV, FLV, MPG, MPEG, 3GP. Videos can be up to 10 minutes.</p></details>
             {file && <div className="selected"><div><strong>{file.name}</strong><small>{sizeLabel(file.size)}</small></div>
               <button type="button" className="quiet" disabled={!canSelect} onClick={() => { choose(); input.current?.focus(); }}>Remove</button></div>}
             {validation && <p className="notice" role="alert">{validation}</p>}
