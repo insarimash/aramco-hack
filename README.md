@@ -17,7 +17,9 @@ Open http://localhost:3000. Put the real key in the ignored `.env.local` file an
 | --- | --- |
 | `UPSTAGE_API_KEY` | Required. Get your key in [Upstage Studio](https://console.upstage.ai/api-keys). |
 | `UPSTAGE_AGENT_ID` | Optional. Defaults to the agent ID in [workflow-doc.md](workflow-doc.md). |
-| `UPSTAGE_CONFIG_ID` | Optional. Defaults to documented config 3. |
+| `UPSTAGE_CONFIG_ID` | Optional. Defaults to config 1, as shown in the cURL example in [workflow-doc.md](workflow-doc.md). |
+
+If you deployed the previous workflow with explicit agent or config overrides, clear those overrides to use the new defaults or update them to the new agent and config 1.
 
 The API base URL is fixed at `https://api.upstage.ai/v2`. Upload one file per review. The app checks its extension, nonzero size, and 500 MB limit in the browser and on the server. Upstage checks the document contents, the 1,000-page limit and the 10-minute video limit.
 

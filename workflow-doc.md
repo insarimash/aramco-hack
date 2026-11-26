@@ -66,8 +66,8 @@ Content-Type: application/json
 
 | Parameter  | Type   | Required | Description                                                    |
 |------------|--------|----------|----------------------------------------------------------------|
-| model      | string | Yes      | Agent ID: `agt_UejyQNRD7taw3EziiAdqyJ`    |
-| config_id  | string | No       | Config version ID (e.g., `"3"`). Omit to use latest.          |
+| model      | string | Yes      | Agent ID: `agt_5gEZbL3mwPnR9ofmsZDSfU`    |
+| config_id  | string | No       | Config version ID (e.g., `"1"`). Omit to use latest.          |
 | input      | array  | Yes      | Array of input messages with file references (see below)       |
 | include    | array  | No       | `["last"]` for final step only, `["all"]` for all step results |
 
@@ -133,8 +133,8 @@ print(f"Uploaded: {file.id}")
 
 # Step 2: Create job
 job = client.responses.create(
-    model="agt_UejyQNRD7taw3EziiAdqyJ",  # Agent ID
-    # config_id="3",
+    model="agt_5gEZbL3mwPnR9ofmsZDSfU",  # Agent ID
+    # config_id="1",
     include=["last"],                       # "last" = final step only, "all" = every step
     input=[{
         "role": "user",
@@ -182,8 +182,8 @@ JOB_RESPONSE=$(curl -s -X POST https://api.upstage.ai/v2/responses \
   -H "Authorization: Bearer $UPSTAGE_API_KEY" \
   -H "Content-Type: application/json" \
   -d "{
-    \"model\": \"agt_UejyQNRD7taw3EziiAdqyJ\",
-  "config_id": "3",
+    \"model\": \"agt_5gEZbL3mwPnR9ofmsZDSfU\",
+  "config_id": "1",
     \"include\": [\"last\"],
     \"input\": [{
       \"role\": \"user\",
@@ -222,7 +222,7 @@ done
   "id": "job_xxxxxxxxxxxxx",
   "object": "response",
   "status": "completed",
-  "model": "agt_UejyQNRD7taw3EziiAdqyJ",
+  "model": "agt_5gEZbL3mwPnR9ofmsZDSfU",
   "output": [
     {
       "type": "message",
@@ -265,7 +265,7 @@ def process_file(path):
         file = client.files.create(file=f, purpose="user_data")
 
     job = client.responses.create(
-        model="agt_UejyQNRD7taw3EziiAdqyJ",
+        model="agt_5gEZbL3mwPnR9ofmsZDSfU",
         include=["last"],
         input=[{"role": "user", "content": [{"type": "input_file", "file_id": file.id}]}]
     )
@@ -311,8 +311,8 @@ Instructions for AI assistants: when a job fails, read `error` and act on it. Re
 
 ## Notes
 
-- Agent ID: `agt_UejyQNRD7taw3EziiAdqyJ`
-- Config ID: `3`
+- Agent ID: `********************`
+- Config ID: `*`
 - The API is OpenAI SDK compatible. Use the `openai` Python package with `base_url="https://api.upstage.ai/v2"`
 - Files are retained server-side until explicitly deleted
 - Max file size: 500MB. Max pages per document: 1,000. Max video length: 10 minutes

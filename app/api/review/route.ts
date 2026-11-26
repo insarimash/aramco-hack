@@ -103,8 +103,8 @@ export async function POST(request: Request) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: process.env.UPSTAGE_AGENT_ID?.trim() || "agt_UejyQNRD7taw3EziiAdqyJ",
-        config_id: process.env.UPSTAGE_CONFIG_ID?.trim() || "3",
+        model: process.env.UPSTAGE_AGENT_ID?.trim() || "agt_5gEZbL3mwPnR9ofmsZDSfU",
+        config_id: process.env.UPSTAGE_CONFIG_ID?.trim() || "1",
         include: ["last"],
         input: [{ role: "user", content: [{ type: "input_file", file_id: fileId }] }],
       }),
