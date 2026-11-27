@@ -20,13 +20,17 @@ Set `CBAM_DATA_DIR` before starting the server to use a different directory for 
 | --- | --- |
 | `UPSTAGE_API_KEY` | Required. Get your key in [Upstage Studio](https://console.upstage.ai/api-keys). |
 | `UPSTAGE_AGENT_ID` | Optional. Defaults to the agent ID in [workflow-doc.md](workflow-doc.md). |
-| `UPSTAGE_CONFIG_ID` | Optional. Defaults to config 7, as shown in the cURL example in [workflow-doc.md](workflow-doc.md). |
+| `UPSTAGE_CONFIG_ID` | Optional. Defaults to config 10, as shown in the cURL example in [workflow-doc.md](workflow-doc.md). |
 
-If you deployed the previous workflow with explicit agent or config overrides, clear those overrides to use the new defaults or update them to the current agent and config 7.
+If you deployed the previous workflow with explicit agent or config overrides, clear those overrides to use the new defaults or update them to the current agent and config 10.
 
 The API base URL is fixed at `https://api.upstage.ai/v2`. Upload one PDF per review, combining the five documents listed in [instruction.md](instruction.md). The app checks its extension, nonzero size, and 500 MB limit in the browser and on the server. Upstage checks the document contents and the 1,000-page limit.
 
 ## Workflow
+
+The server saves Upstage response bodies before parsing, including HTTP errors. Find status responses in `local-data/upstage-responses/<job-id>/` and upload and creation responses in `local-data/upstage-responses/submission-*/`. The creation response contains the job ID when Upstage returns one. Each capture contains the HTTP status, content type, and original response text in `body`. If `CBAM_DATA_DIR` is set, the captures are stored there instead. To capture a fresh status response for an earlier parsing failure, open its History details and choose **Recheck result**.
+
+With `npm run dev` running, open [Workflow response preview](http://localhost:3000/preview). Choose a Studio JSON export or paste the raw job API response, then select a result to inspect its evidence. The preview uses the same parser and result display as the dashboard. It runs in the browser without uploading the file, starting a job, or changing History.
 
 The app uploads the document to `/files`, starts a job through `/responses`, and polls the original job about every 2.5 seconds. Polling backs off on transient failures and can be resumed from History. Results appear below the review steps. Open a result to see the Markdown case record and source pages, or reopen the same result from History. The dashboard also displays structured findings from earlier workflows. Terminal failures are recorded in History.
 

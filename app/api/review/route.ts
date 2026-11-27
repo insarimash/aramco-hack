@@ -1,5 +1,7 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
-import { maxFileBytes, validateFile, type ReviewResponse } from "../../../src/review";
+import { readResult } from "../../../src/upstage-result";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { captureUpstageResponse } from "../../../src/upstage-capture";
+import { canRecheckResult, maxFileBytes, validateFile, type ReviewResponse } from "../../../src/review";
 import { addReview, completeReview, currentUser, getReview } from "../../../src/local-store";
 
 export const runtime = "nodejs";
@@ -17,7 +19,6 @@ function error(message: string, status: number, options: { unknown?: boolean; re
 
 function upstreamError(response: Response, phase: "upload" | "create" | "poll") {
   const status = response.status;
-  void response.body?.cancel().catch(() => {});
   if (status === 401 || status === 403) return error("Upstage rejected authentication. Check UPSTAGE_API_KEY and agent access.", 502);
   if (status === 404) return error("Upstage could not find the agent or job. Check the configured agent and job in Studio.", 502);
   if (status === 413) return error("Upstage rejected the document size. Check the file and page limits.", 413);
@@ -96,9 +97,11 @@ export async function POST(request: Request) {
     const document = new FormData();
     document.set("file", file);
     document.set("purpose", "user_data");
+    const submission = "submission-" + randomUUID();
     const upload = await requestUpstage("/files", key, { method: "POST", body: document }, 600_000);
+    const uploadBody = await captureUpstageResponse(upload, submission, "upload");
     if (!upload.ok) return upstreamError(upload, "upload");
-    const { id: fileId } = object(await upload.json());
+    const { id: fileId } = object(JSON.parse(uploadBody));
     if (typeof fileId !== "string" || !fileId) return error("Upstage returned no file reference. Try the upload again.", 502);
 
     creating = true;
@@ -107,13 +110,14 @@ export async function POST(request: Request) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: process.env.UPSTAGE_AGENT_ID?.trim() || "agt_LCcDmm5fNHW8mu5gG3ZS8W",
-        config_id: process.env.UPSTAGE_CONFIG_ID?.trim() || "7",
+        config_id: process.env.UPSTAGE_CONFIG_ID?.trim() || "10",
         include: ["last"],
         input: [{ role: "user", content: [{ type: "input_file", file_id: fileId }] }],
       }),
     }, 60_000);
+    const creationBody = await captureUpstageResponse(creation, submission, "create");
     if (!creation.ok) return upstreamError(creation, "create");
-    const { id } = object(await creation.json());
+    const { id } = object(JSON.parse(creationBody));
     if (typeof id !== "string" || !/^[\w-]{1,256}$/.test(id)) return uncertain();
     const run = id + "." + signature(id, key);
     await addReview(user.id, run, file);
@@ -127,92 +131,6 @@ export async function POST(request: Request) {
   } finally {
     uploading = false;
   }
-}
-
-function finalStepText(output: unknown) {
-  if (!Array.isArray(output)) return undefined;
-  const content = output.flatMap((item) => {
-    const content = object(item).content;
-    return Array.isArray(content) ? content : [];
-  });
-  return content.map(object).findLast((item) =>
-    item.type === "output_text" && typeof item.text === "string" && item.text.trim()
-  )?.text;
-}
-
-function readLeadingJson(text: string): number {
-  let depth = 0;
-  let quoted = false;
-  for (let index = 0; index < text.length; index++) {
-    const character = text[index];
-    if (quoted) {
-      if (character === "\\") index++;
-      else if (character === '"') quoted = false;
-    } else if (character === '"') {
-      quoted = true;
-    } else if (character === "{" || character === "[") {
-      depth++;
-    } else if (character === "}" || character === "]") {
-      depth--;
-      if (depth === 0) return index + 1;
-    }
-  }
-  return text.length;
-}
-
-function parseResult(text: string): unknown {
-  const trimmed = text.trim();
-  const fenced = /^```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n```(?=\s|$)/i.exec(trimmed);
-  const json = fenced?.[1] ?? trimmed;
-  const end = !fenced && json.startsWith("{") ? readLeadingJson(json) : json.length;
-  const parsed: unknown = JSON.parse(json.slice(0, end));
-  const remainder = fenced ? trimmed.slice(fenced[0].length) : json.slice(end);
-  if (remainder && !/^\s*\r?\n/.test(remainder)) throw new SyntaxError("Expected a separate summary");
-  const summary = remainder.trim();
-  return summary && parsed && typeof parsed === "object" && !Array.isArray(parsed)
-    ? { summary, ...parsed }
-    : parsed;
-}
-
-function decodeResult(value: unknown): unknown {
-  const parsed = typeof value === "string" ? parseResult(value) : value;
-  return typeof parsed === "string" ? parseResult(parsed) : parsed;
-}
-
-function readResult(job: Record<string, unknown>) {
-  const candidates = new Set([
-    typeof job.content === "string" ? { content: job.content, metadata: job.metadata } : undefined,
-    job.output_text,
-    finalStepText(job.output),
-  ]);
-  let hasText = false;
-  for (const candidate of candidates) {
-    if (candidate == null || (typeof candidate === "string" && !candidate.trim())) continue;
-    hasText = true;
-    try {
-      let result = decodeResult(candidate);
-      const envelope = object(result);
-      const { content, metadata } = envelope;
-      if (typeof content === "string" && Object.hasOwn(envelope, "metadata")) {
-        try {
-          const findings = decodeResult(content);
-          if (findings && typeof findings === "object" && !Array.isArray(findings)) result = { metadata, ...findings };
-        } catch {
-          if (!content.trim()) continue;
-          result = { content, metadata };
-        }
-      }
-      if (result !== null && typeof result === "object") return { result };
-    } catch {
-      // Try the final-step content when the shortcut does not contain usable JSON.
-    }
-  }
-  for (const candidate of candidates) {
-    if (typeof candidate === "string" && /^#{1,6}\s/m.test(candidate)) {
-      return { result: { content: candidate, metadata: job.metadata } };
-    }
-  }
-  return { issue: hasText ? "returned invalid or unstructured JSON" : "returned no result text" };
 }
 
 const failureMessages: Record<string, string> = {
@@ -232,8 +150,8 @@ export async function GET(request: Request) {
   const token = new URL(request.url).searchParams.get("run") ?? "";
   const saved = await getReview(user.id, token);
   if (!saved) return error("This review does not belong to your account.", 403);
-  if (saved.failure) return error(saved.failure, 422);
-  if (saved.completedAt) return reply({ state: "completed", result: saved.result });
+  if (saved.failure && !canRecheckResult(saved.failure)) return error(saved.failure, 422);
+  if (saved.completedAt && !saved.failure) return reply({ state: "completed", result: saved.result });
   const key = process.env.UPSTAGE_API_KEY?.trim();
   if (!key) return error("The server needs an Upstage API key to check this job.", 503);
   const id = readRun(token, key);
@@ -244,8 +162,14 @@ export async function GET(request: Request) {
   }
   try {
     const response = await requestUpstage("/responses/" + id + "?include[]=last", key, {}, 20_000);
+    const body = await captureUpstageResponse(response, id, "poll");
     if (!response.ok) return upstreamError(response, "poll");
-    const job = object(await response.json());
+    let job: Record<string, unknown>;
+    try {
+      job = object(JSON.parse(body));
+    } catch {
+      return error("Upstage returned a status response that could not be read as JSON. Recheck the existing job.", 502, { retry: true });
+    }
     if (job.status === "completed") {
       const { result, issue } = readResult(job);
       if (result !== undefined) {

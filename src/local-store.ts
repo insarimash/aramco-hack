@@ -6,6 +6,7 @@ import { createWriteStream } from "node:fs";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
+import { canRecheckResult } from "./review";
 
 const scrypt = promisify(callbackScrypt);
 const directory = process.env.CBAM_DATA_DIR || path.join(process.cwd(), "local-data");
@@ -109,7 +110,15 @@ export async function reviewSource(userId: string, run: string) {
   if (source) return { fileName: review.fileName, stream: Readable.toWeb(source.createReadStream()) as ReadableStream<Uint8Array> };
 }
 export async function completeReview(userId: string, run: string, result: unknown, failure?: string) {
-  await locked(async () => { const store = await read(); const item = store.reviews.find((review) => review.userId === userId && review.run === run); if (item && !item.completedAt) { item.result = result; item.failure = failure; item.completedAt = new Date().toISOString(); await write(store); } });
+  await locked(async () => {
+    const store = await read();
+    const item = store.reviews.find((review) => review.userId === userId && review.run === run);
+    if (!item || (item.completedAt && !(result !== undefined && canRecheckResult(item.failure)))) return;
+    item.result = result;
+    item.failure = failure;
+    item.completedAt ??= new Date().toISOString();
+    await write(store);
+  });
 }
 export async function history(userId: string) {
   return locked(async () => (await read()).reviews.filter((item) => item.userId === userId).map(({ run, fileName, createdAt, completedAt, result, failure, hasSource }) => ({ run, fileName, createdAt, completedAt, result, failure, hasSource })).reverse());

@@ -1,4 +1,7 @@
 ﻿import { Fragment, type ReactNode } from "react";
+import { marketEvidence, reviewIssues } from "./market-evidence";
+
+const codeFence = /^[ \t]*```[\w-]*[ \t]*\r?\n([\s\S]*?)^[ \t]*```[ \t]*\r?$/m;
 
 export function fields(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -24,6 +27,10 @@ function recordCases(content: string) {
 
 export function reviewStatus(result: unknown) {
   const record = fields(result);
+  const worksheet = worksheetFields(record);
+  if (worksheet.status === "NEEDS_REVIEW") return "Needs review";
+  const outcome = worksheet.korea_grade ?? worksheet.japan_determination ?? worksheet.tariff_status;
+  if (typeof outcome === "string") return title(outcome);
   if (typeof record.content === "string") {
     const statuses = [...new Set(recordCases(record.content).map(({ text }) => statusOf(text)))];
     if (statuses.length === 1 && statuses[0]) return title(statuses[0]);
@@ -71,9 +78,23 @@ function MarkdownProse({ text }: { text: string }) {
 }
 
 function Markdown({ text }: { text: string }) {
-  return text.split(/^[ \t]*```[\w-]*[ \t]*\r?\n([\s\S]*?)^[ \t]*```[ \t]*\r?$/m).map((part, index) =>
+  return text.split(codeFence).map((part, index) =>
     index % 2 === 1 ? <pre key={index}><code>{part.trimEnd()}</code></pre> : <MarkdownProse key={index} text={part} />
   );
+}
+
+function worksheetFields(record: Record<string, unknown>) {
+  if (typeof record.content !== "string") return record;
+  const blocks = record.content.split(codeFence);
+  for (let index = blocks.length - 2; index >= 1; index -= 2) {
+    try {
+      const parsed = fields(JSON.parse(blocks[index]));
+      if (["korea_grade", "korea_e_rounded", "japan_determination", "japan_ci_kg_per_kg_nh3", "tariff_status", "final_tariff_eur"].some((key) => Object.hasOwn(parsed, key))) return parsed;
+    } catch {
+      // The worksheet also contains plain-text calculation blocks.
+    }
+  }
+  return record;
 }
 
 function documentType(text: string) {
@@ -108,35 +129,56 @@ export function Results({ result, fileName, sourceUrl, selected, onSelect, fallb
   onSelect: (index: number | null) => void; fallback: ReactNode;
 }) {
   const record = fields(result);
+  const workflow = worksheetFields(record);
+  const markets = marketEvidence(workflow);
+  const issues = reviewIssues(workflow);
   const cases = typeof record.content === "string" && record.content.trim()
     ? recordCases(record.content)
     : [{ name: "Workflow findings", text: "" }];
-  const current = selected === null ? undefined : cases[selected];
-  const sources = current ? sourcesFor(record.metadata, current.text, cases.length === 1) : [];
+  const rows = markets.length ? markets.map((market) => ({
+    name: market.name, detail: market.regulation, text: "", status: market.status, market,
+  })) : cases.map(({ name, text }) => {
+    const type = documentType(text);
+    return { name: type ? title(type) : name, detail: type ? name : undefined, text, status: statusOf(text), market: undefined };
+  });
+  const current = selected === null ? undefined : rows[selected];
+  const sources = current ? sourcesFor(record.metadata, current.text, markets.length > 0 || cases.length === 1) : [];
   const page = sources[0]?.pages[0]?.[0];
   return <>
     <section className="result-list" aria-labelledby="results-heading">
-      <div className="section-heading"><h2 id="results-heading">Results</h2><span>{cases.length} {cases.length === 1 ? "record" : "records"}</span></div>
-      {cases.map((item, index) => {
-        const type = documentType(item.text);
-        const status = statusOf(item.text);
+      <div className="section-heading"><h2 id="results-heading">Results</h2><span>{rows.length} {markets.length ? (rows.length === 1 ? "market" : "markets") : (rows.length === 1 ? "record" : "records")}</span></div>
+      {rows.map((item, index) => {
+        const status = item.status;
         return <button type="button" className="result-card" key={index} aria-expanded={selected === index} onClick={() => onSelect(selected === index ? null : index)}>
-          <span className="result-icon" aria-hidden="true">✓</span>
-          <span className="result-name"><strong>{type ? title(type) : item.name}</strong>{type && <small>{item.name}</small>}</span>
+          <span className="result-icon" aria-hidden="true">{item.market ? item.market.key.toUpperCase() : "✓"}</span>
+          <span className="result-name"><strong>{item.name}</strong>{item.detail && <small>{item.detail}</small>}{item.market?.headline && <span className="result-metric">{item.market.headline.value}</span>}</span>
           <span className={badgeClass(status ?? reviewStatus(result))}>{status ? title(status) : item.text ? "View findings" : reviewStatus(result)}</span>
           <span className="chevron" aria-hidden="true" />
         </button>;
       })}
+      {markets.length > 0 && <details className="raw workflow-response"><summary>View full workflow response</summary><div className="record-content" dir="auto">{typeof record.content === "string" ? <Markdown text={record.content} /> : fallback}</div>{typeof record.content === "string" && <details className="raw"><summary>View raw JSON</summary><pre>{JSON.stringify(result, null, 2)}</pre></details>}</details>}
     </section>
     {current && <aside className="evidence" aria-labelledby="evidence-heading">
       <div className="evidence-heading"><h2 id="evidence-heading">Evidence</h2><button type="button" className="icon-button" aria-label="Close evidence" onClick={() => onSelect(null)}>×</button></div>
       <div className="evidence-body">
-        <div className="source-info">
+        {current.market && <>
+          <section className="market-overview">
+            <h3>{current.market.regulation}</h3>
+            <p>{current.market.description}</p>
+            {current.status && <span className={badgeClass(current.status)}>{title(current.status)}</span>}
+            {current.market.headline && <div className="market-headline"><strong>{current.market.headline.value}</strong><span>{current.market.headline.label}</span></div>}
+          </section>
+          {workflow.status === "NEEDS_REVIEW" && <section className="market-note"><h3>Review needed</h3>{issues.length > 0 && <ul>{issues.map((issue, index) => <li key={index}>{issue}</li>)}</ul>}</section>}
+          {current.market.metrics.length > 0 && <section className="market-section"><h3>Supporting figures</h3><dl>{current.market.metrics.map(({ label, value }) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></section>}
+          {current.market.note && <section className="market-note"><h3>Workflow notes</h3><p>{current.market.note}</p></section>}
+        </>}
+        {(sources.length > 0 || fileName || sourceUrl) && <div className="source-info">
+          {current.market && <h3>Source documents</h3>}
           {(sources.length ? sources : fileName ? [{ name: fileName, pages: [] }] : []).map((source, index) =>
             <div key={index}><strong>{source.name}</strong>{source.pages.length > 0 && <small>{source.pages.length === 1 && source.pages[0][0] === source.pages[0][1] ? "Page " : "Pages "}{source.pages.map(([start, end]) => start === end ? start : start + "–" + end).join(", ")}</small>}</div>)}
           {sourceUrl && <a href={sourceUrl + (page && /\.pdf$/i.test(fileName) ? "#page=" + page : "")} target="_blank" rel="noreferrer">Open source document</a>}
-        </div>
-        <div className="record-content" dir="auto">{current.text ? <Markdown text={current.text} /> : fallback}</div>
+        </div>}
+        {!current.market && <div className="record-content" dir="auto">{current.text ? <Markdown text={current.text} /> : fallback}</div>}
         {current.text && <details className="raw"><summary>View raw JSON</summary><pre>{JSON.stringify(result, null, 2)}</pre></details>}
       </div>
     </aside>}
@@ -145,8 +187,8 @@ export function Results({ result, fileName, sourceUrl, selected, onSelect, fallb
 
 export function badgeClass(status?: string) {
   const value = status?.toLowerCase() ?? "";
-  if (/fail|cancel|reject/.test(value)) return "badge negative";
-  if (/note|pending|process|review|multiple/.test(value)) return "badge caution";
-  if (value === "ok" || /pass|complete/.test(value)) return "badge positive";
+  if (/fail|cancel|reject|not[ _-](eligible|clean)/.test(value)) return "badge negative";
+  if (/note|pending|process|review|multiple|not[ _-](calculated|determined)/.test(value)) return "badge caution";
+  if (["ok", "calculated"].includes(value) || /pass|complete/.test(value)) return "badge positive";
   return "badge";
 }

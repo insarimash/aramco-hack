@@ -13,3 +13,7 @@ export type ReviewResponse =
   | { state: "processing"; run: string }
   | { state: "completed"; result: unknown }
   | { state: "error"; message: string; unknown?: boolean; retry?: boolean; delay?: number };
+
+export function canRecheckResult(failure?: string) {
+  return failure?.startsWith("The job finished and returned ") ?? false;
+}
